@@ -1319,6 +1319,9 @@ func (s *Service) applyConfigUpdateWithAuthSynthesis(newCfg *config.Config, synt
 	s.applyRetryConfig(newCfg)
 	s.configureCooldownStateStore(newCfg)
 	s.applyPprofConfig(newCfg)
+	if newCfg != nil {
+		executor.SetClaudeToolRenameOverride(newCfg.ClaudeToolRename)
+	}
 	if s.server != nil {
 		s.server.UpdateClients(newCfg)
 	}

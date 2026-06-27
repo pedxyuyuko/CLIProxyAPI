@@ -54,6 +54,9 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 	if oldCfg.DisableClaudeCloakMode != newCfg.DisableClaudeCloakMode {
 		changes = append(changes, fmt.Sprintf("disable-claude-cloak-mode: %t -> %t", oldCfg.DisableClaudeCloakMode, newCfg.DisableClaudeCloakMode))
 	}
+	if !stringMapEqual(oldCfg.ClaudeToolRename, newCfg.ClaudeToolRename) {
+		changes = append(changes, fmt.Sprintf("claude-tool-rename: %d -> %d entries", len(oldCfg.ClaudeToolRename), len(newCfg.ClaudeToolRename)))
+	}
 	if oldCfg.DisableImageGeneration != newCfg.DisableImageGeneration {
 		changes = append(changes, fmt.Sprintf("disable-image-generation: %v -> %v", oldCfg.DisableImageGeneration, newCfg.DisableImageGeneration))
 	}
@@ -388,4 +391,16 @@ func formatProxyURL(raw string) string {
 		return host
 	}
 	return scheme + "://" + host
+}
+
+func stringMapEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if bv, ok := b[k]; !ok || bv != v {
+			return false
+		}
+	}
+	return true
 }

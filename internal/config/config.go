@@ -143,6 +143,14 @@ type Config struct {
 	// the auth/OAuth token file). Default false preserves the per-client "auto" behavior.
 	DisableClaudeCloakMode bool `yaml:"disable-claude-cloak-mode" json:"disable-claude-cloak-mode"`
 
+	// ClaudeToolRename extends the built-in OAuth tool-name rename map used when
+	// cloaking Claude OAuth traffic. Anthropic fingerprints third-party clients by
+	// tool name, so requests are renamed to neutral/official-style names before they
+	// reach the API. Each entry maps an incoming tool name to the name sent upstream;
+	// responses are mapped back automatically. Entries here override or extend the
+	// built-in defaults (e.g. "call_omo_agent": "callOmoAgent"). Empty by default.
+	ClaudeToolRename map[string]string `yaml:"claude-tool-rename,omitempty" json:"claude-tool-rename,omitempty"`
+
 	// OpenAICompatibility defines OpenAI API compatibility configurations for external providers.
 	OpenAICompatibility []OpenAICompatibility `yaml:"openai-compatibility" json:"openai-compatibility"`
 

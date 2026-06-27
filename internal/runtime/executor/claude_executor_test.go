@@ -2782,6 +2782,42 @@ func TestRemapOAuthToolNames_MixedCase_OnlyRenamedToolsReversed(t *testing.T) {
 
 // TestReverseRemapOAuthToolNamesFromStreamLine_HonorsPerRequestMap guards the
 // SSE streaming code path against the same mixed-case bug.
+func TestRemapOAuthToolNames_ConfigOverrideRenamesUnknownTool(t *testing.T) {
+	t.Cleanup(func() { SetClaudeToolRenameOverride(nil) })
+	SetClaudeToolRenameOverride(map[string]string{"call_omo_agent": "callOmoAgent"})
+
+	body := []byte(`{"tools":[{"name":"call_omo_agent","description":"spawn","input_schema":{"type":"object","properties":{}}}],"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`)
+
+	out, reverseMap := remapOAuthToolNames(body)
+	if got := gjson.GetBytes(out, "tools.0.name").String(); got != "callOmoAgent" {
+		t.Fatalf("tools.0.name = %q, want %q", got, "callOmoAgent")
+	}
+	if reverseMap["callOmoAgent"] != "call_omo_agent" {
+		t.Fatalf("reverseMap = %v, want entry callOmoAgent->call_omo_agent", reverseMap)
+	}
+
+	resp := []byte(`{"content":[{"type":"tool_use","id":"toolu_01","name":"callOmoAgent","input":{}}]}`)
+	reversed := reverseRemapOAuthToolNames(resp, reverseMap)
+	if got := gjson.GetBytes(reversed, "content.0.name").String(); got != "call_omo_agent" {
+		t.Fatalf("content.0.name = %q, want %q", got, "call_omo_agent")
+	}
+}
+
+func TestRemapOAuthToolNames_ConfigOverrideTakesPrecedenceOverBuiltin(t *testing.T) {
+	t.Cleanup(func() { SetClaudeToolRenameOverride(nil) })
+	SetClaudeToolRenameOverride(map[string]string{"bash": "ShellExec"})
+
+	body := []byte(`{"tools":[{"name":"bash","input_schema":{"type":"object","properties":{}}}],"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`)
+
+	out, reverseMap := remapOAuthToolNames(body)
+	if got := gjson.GetBytes(out, "tools.0.name").String(); got != "ShellExec" {
+		t.Fatalf("tools.0.name = %q, want %q (override should beat builtin bash->Bash)", got, "ShellExec")
+	}
+	if reverseMap["ShellExec"] != "bash" {
+		t.Fatalf("reverseMap = %v, want entry ShellExec->bash", reverseMap)
+	}
+}
+
 func TestReverseRemapOAuthToolNamesFromStreamLine_HonorsPerRequestMap(t *testing.T) {
 	reverseMap := map[string]string{"Glob": "glob"}
 

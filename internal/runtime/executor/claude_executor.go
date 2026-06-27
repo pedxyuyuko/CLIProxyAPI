@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/andybalholm/brotli"
@@ -141,6 +142,44 @@ var oauthToolRenameMap = map[string]string{
 // lowercase; the request flagged renames via `glob` -> `Glob`, then the global
 // reverse map incorrectly rewrote every `Bash` in the response to `bash`).
 
+// toolRenameOverride holds user-configured tool renames (config claude-tool-rename)
+// merged on top of oauthToolRenameMap at request time. It is stored atomically so
+// config hot-reload can swap it without locking the request path.
+var toolRenameOverride atomic.Value
+
+// SetClaudeToolRenameOverride installs the user-configured tool rename overrides.
+// Passing nil or an empty map clears any previous override. Safe for concurrent use.
+func SetClaudeToolRenameOverride(overrides map[string]string) {
+	cleaned := make(map[string]string, len(overrides))
+	for from, to := range overrides {
+		from = strings.TrimSpace(from)
+		to = strings.TrimSpace(to)
+		if from == "" || to == "" {
+			continue
+		}
+		cleaned[from] = to
+	}
+	toolRenameOverride.Store(cleaned)
+}
+
+// effectiveToolRenameMap returns the built-in rename map merged with any
+// user-configured overrides. Overrides take precedence over built-in entries.
+// When no overrides are configured the built-in map is returned directly.
+func effectiveToolRenameMap() map[string]string {
+	override, _ := toolRenameOverride.Load().(map[string]string)
+	if len(override) == 0 {
+		return oauthToolRenameMap
+	}
+	merged := make(map[string]string, len(oauthToolRenameMap)+len(override))
+	for from, to := range oauthToolRenameMap {
+		merged[from] = to
+	}
+	for from, to := range override {
+		merged[from] = to
+	}
+	return merged
+}
+
 // oauthToolsToRemove lists tool names that must be stripped from OAuth requests
 // even after remapping. Currently empty — all tools are mapped instead of removed.
 var oauthToolsToRemove = map[string]bool{}
@@ -149,7 +188,12 @@ var oauthToolsToRemove = map[string]bool{}
 // omit max_tokens. Prefer registered model metadata before using a fallback.
 const defaultModelMaxTokens = 1024
 
-func NewClaudeExecutor(cfg *config.Config) *ClaudeExecutor { return &ClaudeExecutor{cfg: cfg} }
+func NewClaudeExecutor(cfg *config.Config) *ClaudeExecutor {
+	if cfg != nil {
+		SetClaudeToolRenameOverride(cfg.ClaudeToolRename)
+	}
+	return &ClaudeExecutor{cfg: cfg}
+}
 
 func (e *ClaudeExecutor) Identifier() string { return "claude" }
 
@@ -1293,7 +1337,8 @@ func restoreClaudeOAuthToolNamesFromStreamLine(line []byte, prefix string, prefi
 // `glob` -> `Glob`), because the global reverse map contained `Bash` -> `bash`
 // regardless of what the client originally sent.
 func remapOAuthToolNames(body []byte) ([]byte, map[string]string) {
-	reverseMap := make(map[string]string, len(oauthToolRenameMap))
+	renameMap := effectiveToolRenameMap()
+	reverseMap := make(map[string]string, len(renameMap))
 	recordRename := func(original, renamed string) {
 		// Preserve the first-seen original name if the same upstream name is
 		// produced from multiple call sites; they all map back identically.
@@ -1330,7 +1375,7 @@ func remapOAuthToolNames(body []byte) ([]byte, map[string]string) {
 			}
 
 			toolJSON := tool.Raw
-			if newName, ok := oauthToolRenameMap[name]; ok && newName != name {
+			if newName, ok := renameMap[name]; ok && newName != name {
 				updatedTool, err := sjson.Set(toolJSON, "name", newName)
 				if err == nil {
 					toolJSON = updatedTool
@@ -1357,7 +1402,7 @@ func remapOAuthToolNames(body []byte) ([]byte, map[string]string) {
 			// The chosen tool was removed from the tools array, so drop tool_choice to
 			// keep the payload internally consistent and fall back to normal auto tool use.
 			body, _ = sjson.DeleteBytes(body, "tool_choice")
-		} else if newName, ok := oauthToolRenameMap[tcName]; ok && newName != tcName {
+		} else if newName, ok := renameMap[tcName]; ok && newName != tcName {
 			body, _ = sjson.SetBytes(body, "tool_choice.name", newName)
 			recordRename(tcName, newName)
 		}
@@ -1376,14 +1421,14 @@ func remapOAuthToolNames(body []byte) ([]byte, map[string]string) {
 				switch partType {
 				case "tool_use":
 					name := part.Get("name").String()
-					if newName, ok := oauthToolRenameMap[name]; ok && newName != name {
+					if newName, ok := renameMap[name]; ok && newName != name {
 						path := fmt.Sprintf("messages.%d.content.%d.name", msgIndex.Int(), contentIndex.Int())
 						body, _ = sjson.SetBytes(body, path, newName)
 						recordRename(name, newName)
 					}
 				case "tool_reference":
 					toolName := part.Get("tool_name").String()
-					if newName, ok := oauthToolRenameMap[toolName]; ok && newName != toolName {
+					if newName, ok := renameMap[toolName]; ok && newName != toolName {
 						path := fmt.Sprintf("messages.%d.content.%d.tool_name", msgIndex.Int(), contentIndex.Int())
 						body, _ = sjson.SetBytes(body, path, newName)
 						recordRename(toolName, newName)
@@ -1397,7 +1442,7 @@ func remapOAuthToolNames(body []byte) ([]byte, map[string]string) {
 						nestedContent.ForEach(func(nestedIndex, nestedPart gjson.Result) bool {
 							if nestedPart.Get("type").String() == "tool_reference" {
 								nestedToolName := nestedPart.Get("tool_name").String()
-								if newName, ok := oauthToolRenameMap[nestedToolName]; ok && newName != nestedToolName {
+								if newName, ok := renameMap[nestedToolName]; ok && newName != nestedToolName {
 									nestedPath := fmt.Sprintf("messages.%d.content.%d.content.%d.tool_name", msgIndex.Int(), contentIndex.Int(), nestedIndex.Int())
 									body, _ = sjson.SetBytes(body, nestedPath, newName)
 									recordRename(nestedToolName, newName)
