@@ -36,6 +36,11 @@ jobs:
       - name: Generate Build Metadata
         run: |
           echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          if [ "${GITHUB_REF_TYPE}" = "branch" ]; then
+            echo "IMAGE_TAG=edge" >> $GITHUB_ENV
+          else
+            echo "IMAGE_TAG=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          fi
           echo COMMIT=`git rev-parse --short HEAD` >> $GITHUB_ENV
           echo BUILD_DATE=`date -u +%Y-%m-%dT%H:%M:%SZ` >> $GITHUB_ENV
       - name: Build and push (amd64)
@@ -50,7 +55,7 @@ jobs:
             BUILD_DATE=${{ env.BUILD_DATE }}
           tags: |
             ${{ env.GHCR_REPO }}:latest-amd64
-            ${{ env.GHCR_REPO }}:${{ env.VERSION }}-amd64
+            ${{ env.GHCR_REPO }}:${{ env.IMAGE_TAG }}-amd64
 
   docker_manifest:
     runs-on: ubuntu-latest
@@ -70,6 +75,11 @@ jobs:
       - name: Generate Build Metadata
         run: |
           echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          if [ "${GITHUB_REF_TYPE}" = "branch" ]; then
+            echo "IMAGE_TAG=edge" >> $GITHUB_ENV
+          else
+            echo "IMAGE_TAG=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          fi
           echo COMMIT=`git rev-parse --short HEAD` >> $GITHUB_ENV
           echo BUILD_DATE=`date -u +%Y-%m-%dT%H:%M:%SZ` >> $GITHUB_ENV
       - name: Create and push multi-arch manifests
@@ -78,8 +88,8 @@ jobs:
             --tag "${GHCR_REPO}:latest" \
             "${GHCR_REPO}:latest-amd64"
           docker buildx imagetools create \
-            --tag "${GHCR_REPO}:${VERSION}" \
-            "${GHCR_REPO}:${VERSION}-amd64"
+            --tag "${GHCR_REPO}:${IMAGE_TAG}" \
+            "${GHCR_REPO}:${IMAGE_TAG}-amd64"
       - name: Cleanup temporary arch-specific tags
         continue-on-error: true
         env:
@@ -89,7 +99,7 @@ jobs:
           owner="${repo_lower%%/*}"
           pkg="${repo_lower#*/}"
 
-          suffixes=("latest-amd64" "${VERSION}-amd64")
+          suffixes=("latest-amd64" "${IMAGE_TAG}-amd64")
           for suffix in "${suffixes[@]}"; do
             suffix_lower="$(echo "${suffix}" | tr '[:upper:]' '[:lower:]')"
             echo "Cleaning up ${GHCR_REPO}:${suffix_lower}"
