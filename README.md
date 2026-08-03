@@ -1,3 +1,15 @@
+# 归档说明（Archive Notice）
+**本仓库已归档，不再维护。**
+这个 fork 的存在理由只有两条 Claude cloaking 定制：
+- `claude-tool-rename`（commit `aea16801`）— 在内置的 lowercase→TitleCase 工具名映射表上追加/覆盖条目，用于削弱 Anthropic 对第三方客户端的 tool-name 指纹识别。
+- `cloak.preserve-system-prompt`（commit `f33177d1`）— 在 cloaking 生效且 `strict-mode: false` 时，可选择保留调用方原始 system prompt，而不是替换成中性提示。
+上游 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 已分别用更完整的机制取代了这两者：
+- 上游 `f3e25ab2` 引入 per-request MCP tool aliasing（`helps/claude_mcp_alias.go`）。cloaked OAuth 请求上的**每一个** custom tool 都自动映射为 caller 维度稳定的不透明 `mcp__<server>__<tool>` 别名，请求内符号表在响应和流式事件中还原原名。覆盖面严格大于一张手工维护的映射表，`claude-tool-rename` 所依赖的静态 map 已被删除。
+- 上游 `ef89c6a6` + `3fac4a09` 重建了 cloaked system prompt 的处理方式。`strict-mode: false` 下调用方 system 块**原样保留**，仅按模型改变位置：legacy 白名单模型走 `<system-reminder>` 前置到首个 user 消息，其余及未来模型走 mid-conversation `role=system` —— 后者本就是原生 Claude Code 的线格式。这等价于 fork 的 `preserve-system-prompt: true`，且已是默认行为；prompt 脱敏逻辑被上游判定为不再必要而移除。
+结论：fork 的两个特性一个被超集覆盖，一个被扶正为上游默认。剩余 delta 仅为 Docker 镜像发布路径（`ghcr.io/pedxyuyuko/cli-proxy-api`）与 `fork/main` 分支 CI，不足以支撑一个独立 fork。
+同步成本也已不成比例：最后一次上游同步（PR #17）落后 113 个提交、163 个文件、19,321 行插入，冲突集中在 fork 特性所在的 `claude_executor*.go`，且冲突双方是两套互斥的架构而非可合并的增量。
+**迁移方式**：直接使用上游。删除 config 中的 `claude-tool-rename` 块与 `cloak.preserve-system-prompt` 键，以及 Claude OAuth token JSON 中的 `cloak_preserve_system_prompt` 属性——三者在上游均无对应配置项，也不需要。若原先依赖 `preserve-system-prompt: false` 的脱敏行为，上游最接近的是 `cloak.strict-mode: true`，但语义是完全丢弃调用方 prompt 而非降级，会改变模型行为。
+
 # CLIProxyAPI Fork Notes
 
 This fork follows upstream CLIProxyAPI. Most baseline API, model, OAuth, translator, and runtime behavior comes from upstream syncs and is intentionally not repeated here.
